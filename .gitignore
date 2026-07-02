@@ -2,3 +2,5 @@
 *.o
 *.d
 temu
+js/riscvemu64-wasm.js
+js/riscvemu64-wasm.wasm

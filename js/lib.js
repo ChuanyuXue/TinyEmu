@@ -1,6 +1,6 @@
 /*
  * JS emulator library
- * 
+ *
  * Copyright (c) 2017 Fabrice Bellard
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -22,6 +22,14 @@
  * THE SOFTWARE.
  */
 mergeInto(LibraryManager.library, {
+    /* shared state, replaces the removed Browser.* internals */
+    $TinyEmuState: {
+        wgetRequests: {},
+        wgetNextHandle: 1,
+        fbufTable: {},
+        fbufNextHandle: 1,
+    },
+
     console_write: function(opaque, buf, len)
     {
         var str;
@@ -33,7 +41,7 @@ mergeInto(LibraryManager.library, {
 
     console_get_size: function(pw, ph)
     {
-        var w, h, r;
+        var r;
         r = term.getSize();
         HEAPU32[pw >> 2] = r[0];
         HEAPU32[ph >> 2] = r[1];
@@ -41,7 +49,7 @@ mergeInto(LibraryManager.library, {
 
     fs_export_file: function(filename, buf, buf_len)
     {
-        var _filename = Pointer_stringify(filename);
+        var _filename = UTF8ToString(filename);
 //        console.log("exporting " + _filename);
         var data = HEAPU8.subarray(buf, buf + buf_len);
         var file = new Blob([data], { type: "application/octet-stream" });
@@ -58,30 +66,31 @@ mergeInto(LibraryManager.library, {
         }, 50);
     },
 
+    emscripten_async_wget3_data__deps: ['$TinyEmuState', 'malloc', 'free'],
     emscripten_async_wget3_data: function(url, request, user, password, post_data, post_data_len, arg, free, onload, onerror, onprogress) {
-    var _url = Pointer_stringify(url);
-    var _request = Pointer_stringify(request);
+    var _url = UTF8ToString(url);
+    var _request = UTF8ToString(request);
     var _user;
     var _password;
 
       var http = new XMLHttpRequest();
 
       if (user)
-          _user = Pointer_stringify(user);
+          _user = UTF8ToString(user);
       else
           _user = null;
       if (password)
-          _password = Pointer_stringify(password);
+          _password = UTF8ToString(password);
       else
           _password = null;
-        
+
       http.open(_request, _url, true);
       http.responseType = 'arraybuffer';
       if (_user) {
           http.setRequestHeader("Authorization", "Basic " + btoa(_user + ':' + _password));
       }
-        
-    var handle = Browser.getNextWgetRequestHandle();
+
+    var handle = TinyEmuState.wgetNextHandle++;
 
     // LOAD
     http.onload = function http_onload(e) {
@@ -89,59 +98,52 @@ mergeInto(LibraryManager.library, {
         var byteArray = new Uint8Array(http.response);
         var buffer = _malloc(byteArray.length);
         HEAPU8.set(byteArray, buffer);
-        if (onload) Runtime.dynCall('viiii', onload, [handle, arg, buffer, byteArray.length]);
+        if (onload) {{{ makeDynCall('viiii', 'onload') }}}(handle, arg, buffer, byteArray.length);
         if (free) _free(buffer);
       } else {
-        if (onerror) Runtime.dynCall('viiii', onerror, [handle, arg, http.status, http.statusText]);
+        if (onerror) {{{ makeDynCall('viiii', 'onerror') }}}(handle, arg, http.status, 0);
       }
-      delete Browser.wgetRequests[handle];
+      delete TinyEmuState.wgetRequests[handle];
     };
 
     // ERROR
     http.onerror = function http_onerror(e) {
       if (onerror) {
-        Runtime.dynCall('viiii', onerror, [handle, arg, http.status, http.statusText]);
+        {{{ makeDynCall('viiii', 'onerror') }}}(handle, arg, http.status, 0);
       }
-      delete Browser.wgetRequests[handle];
+      delete TinyEmuState.wgetRequests[handle];
     };
 
     // PROGRESS
     http.onprogress = function http_onprogress(e) {
-      if (onprogress) Runtime.dynCall('viiii', onprogress, [handle, arg, e.loaded, e.lengthComputable || e.lengthComputable === undefined ? e.total : 0]);
+      if (onprogress) {{{ makeDynCall('viiii', 'onprogress') }}}(handle, arg, e.loaded, e.lengthComputable || e.lengthComputable === undefined ? e.total : 0);
     };
 
     // ABORT
     http.onabort = function http_onabort(e) {
-      delete Browser.wgetRequests[handle];
+      delete TinyEmuState.wgetRequests[handle];
     };
-
-    // Useful because the browser can limit the number of redirection
-    try {
-      if (http.channel instanceof Ci.nsIHttpChannel)
-      http.channel.redirectionLimit = 0;
-    } catch (ex) { /* whatever */ }
 
     if (_request == "POST") {
       var _post_data = HEAPU8.subarray(post_data, post_data + post_data_len);
         //Send the proper header information along with the request
       http.setRequestHeader("Content-type", "application/octet-stream");
-      http.setRequestHeader("Content-length", post_data_len);
-      http.setRequestHeader("Connection", "close");
       http.send(_post_data);
     } else {
       http.send(null);
     }
 
-    Browser.wgetRequests[handle] = http;
+    TinyEmuState.wgetRequests[handle] = http;
 
     return handle;
   },
 
   fs_wget_update_downloading: function (flag)
   {
-      update_downloading(Boolean(flag));
+      if (typeof update_downloading === "function")
+          update_downloading(Boolean(flag));
   },
-    
+
   fb_refresh: function(opaque, data, x, y, w, h, stride)
   {
       var i, j, v, src, image_data, dst_pos, display, dst_pos1, image_stride;
@@ -178,49 +180,45 @@ mergeInto(LibraryManager.library, {
   },
 
   /* file buffer API */
+  file_buffer_get_new_handle__deps: ['$TinyEmuState'],
   file_buffer_get_new_handle: function()
   {
       var h;
-      if (typeof Browser.fbuf_table == "undefined") {
-          Browser.fbuf_table = new Object();
-          Browser.fbuf_next_handle = 1;
-      }
       for(;;) {
-          h = Browser.fbuf_next_handle;
-          Browser.fbuf_next_handle++;
-          if (Browser.fbuf_next_handle == 0x80000000)
-              Browser.fbuf_next_handle = 1;
-          if (typeof Browser.fbuf_table[h] == "undefined") {
+          h = TinyEmuState.fbufNextHandle;
+          TinyEmuState.fbufNextHandle++;
+          if (TinyEmuState.fbufNextHandle == 0x80000000)
+              TinyEmuState.fbufNextHandle = 1;
+          if (typeof TinyEmuState.fbufTable[h] == "undefined") {
 //              console.log("new handle=" + h);
               return h;
           }
       }
   },
-    
+
   file_buffer_init: function(bs)
   {
-      var h;
       HEAPU32[bs >> 2] = 0;
       HEAPU32[(bs + 4) >> 2] = 0;
   },
 
-  file_buffer_resize__deps: ['file_buffer_get_new_handle'],
+  file_buffer_resize__deps: ['file_buffer_get_new_handle', '$TinyEmuState'],
   file_buffer_resize: function(bs, new_size)
   {
-      var h, size, new_data, size1, i, data;
+      var h, size, new_data, i, data;
       h = HEAPU32[bs >> 2];
       size = HEAPU32[(bs + 4) >> 2];
       if (new_size == 0) {
           if (h != 0) {
-              delete Browser.fbuf_table[h];
+              delete TinyEmuState.fbufTable[h];
               h = 0;
           }
       } else if (size == 0) {
           h = _file_buffer_get_new_handle();
           new_data = new Uint8Array(new_size);
-          Browser.fbuf_table[h] = new_data;
+          TinyEmuState.fbufTable[h] = new_data;
       } else if (size != new_size) {
-          data = Browser.fbuf_table[h];
+          data = TinyEmuState.fbufTable[h];
           new_data = new Uint8Array(new_size);
           if (new_size > size) {
               new_data.set(data, 0);
@@ -228,53 +226,57 @@ mergeInto(LibraryManager.library, {
               for(i = 0; i < new_size; i = (i + 1) | 0)
                   new_data[i] = data[i];
           }
-          Browser.fbuf_table[h] = new_data;
+          TinyEmuState.fbufTable[h] = new_data;
       }
       HEAPU32[bs >> 2] = h;
       HEAPU32[(bs + 4) >> 2] = new_size;
       return 0;
   },
-  
+
+  file_buffer_reset__deps: ['file_buffer_resize', 'file_buffer_init'],
   file_buffer_reset: function(bs)
   {
       _file_buffer_resize(bs, 0);
       _file_buffer_init(bs);
   },
-    
+
+  file_buffer_write__deps: ['$TinyEmuState'],
   file_buffer_write: function(bs, offset, buf, size)
   {
       var h, data, i;
       h = HEAPU32[bs >> 2];
       if (h) {
-          data = Browser.fbuf_table[h];
+          data = TinyEmuState.fbufTable[h];
           for(i = 0; i < size; i = (i + 1) | 0) {
               data[offset + i] = HEAPU8[buf + i];
           }
       }
   },
-    
+
+  file_buffer_read__deps: ['$TinyEmuState'],
   file_buffer_read: function(bs, offset, buf, size)
   {
       var h, data, i;
       h = HEAPU32[bs >> 2];
       if (h) {
-          data = Browser.fbuf_table[h];
+          data = TinyEmuState.fbufTable[h];
           for(i = 0; i < size; i = (i + 1) | 0) {
               HEAPU8[buf + i] = data[offset + i];
           }
       }
   },
 
+  file_buffer_set__deps: ['$TinyEmuState'],
   file_buffer_set: function(bs, offset, val, size)
   {
       var h, data, i;
       h = HEAPU32[bs >> 2];
       if (h) {
-          data = Browser.fbuf_table[h];
+          data = TinyEmuState.fbufTable[h];
           for(i = 0; i < size; i = (i + 1) | 0) {
               data[offset + i] = val;
           }
       }
   },
-   
+
 });
