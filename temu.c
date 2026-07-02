@@ -36,6 +36,8 @@
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#endif
+#ifdef __linux__
 #include <linux/if_tun.h>
 #endif
 #include <sys/stat.h>
@@ -346,7 +348,7 @@ static BlockDevice *block_device_init(const char *filename,
     return bs;
 }
 
-#ifndef _WIN32
+#ifdef __linux__
 
 typedef struct {
     int fd;
@@ -788,7 +790,7 @@ int main(int argc, char **argv)
                 exit(1);
         } else
 #endif
-#ifndef _WIN32
+#ifdef __linux__
         if (!strcmp(p->tab_eth[i].driver, "tap")) {
             p->tab_eth[i].net = tun_open(p->tab_eth[i].ifname);
             if (!p->tab_eth[i].net)
