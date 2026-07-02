@@ -366,5 +366,6 @@ BOOL is_url(const char *path)
 {
     return (strstart(path, "http:", NULL) ||
             strstart(path, "https:", NULL) ||
-            strstart(path, "file:", NULL));
+            strstart(path, "file:", NULL) ||
+            strstart(path, "blob:", NULL));
 }

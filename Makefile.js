@@ -28,7 +28,9 @@ EMCFLAGS=-O2 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -MMD -fno-strict-a
 #EMCFLAGS+=-Werror
 EMLDFLAGS=-O3 \
 	--no-entry \
-	-s ENVIRONMENT=web \
+	-s MODULARIZE=1 \
+	-s EXPORT_NAME=TinyEmu \
+	-s ENVIRONMENT=web,worker \
 	-s NO_EXIT_RUNTIME=1 \
 	-s FILESYSTEM=0 \
 	-s ALLOW_MEMORY_GROWTH=0 \
