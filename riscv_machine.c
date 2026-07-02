@@ -593,7 +593,7 @@ static int riscv_build_fdt(RISCVMachine *m, uint8_t *dst,
     int size, max_xlen, i, cur_phandle, intc_phandle, plic_phandle;
     char isa_string[128], *q;
     uint32_t misa;
-    uint32_t tab[4];
+    uint32_t tab[8];
     FBDevice *fb_dev;
     
     s = fdt_init();
@@ -655,8 +655,21 @@ static int riscv_build_fdt(RISCVMachine *m, uint8_t *dst,
     
     fdt_end_node(s); /* memory */
 
-    fdt_begin_node(s, "htif");
+    fdt_begin_node_num(s, "htif", HTIF_BASE_ADDR);
     fdt_prop_str(s, "compatible", "ucb,htif0");
+    /* OpenSBI's HTIF driver reads reg[0] as "fromhost" and reg[1] as
+     * "tohost", which is the reverse of TinyEmu's actual register layout
+     * (tohost at +0, fromhost at +8). List them in the driver's expected
+     * order so it binds to the correct physical addresses. */
+    tab[0] = (uint64_t)(HTIF_BASE_ADDR + 8) >> 32;
+    tab[1] = HTIF_BASE_ADDR + 8;
+    tab[2] = 0;
+    tab[3] = 8;
+    tab[4] = (uint64_t)HTIF_BASE_ADDR >> 32;
+    tab[5] = HTIF_BASE_ADDR;
+    tab[6] = 0;
+    tab[7] = 8;
+    fdt_prop_tab_u32(s, "reg", tab, 8);
     fdt_end_node(s); /* htif */
 
     fdt_begin_node(s, "soc");
