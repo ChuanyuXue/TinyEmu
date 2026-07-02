@@ -838,6 +838,11 @@ static int csr_read(RISCVCPUState *s, target_ulong *pval, uint32_t csr,
             goto invalid_csr;
         val = s->insn_counter >> 32;
         break;
+    case 0xf11: /* mvendorid */
+    case 0xf12: /* marchid */
+    case 0xf13: /* mimpid */
+        val = 0;
+        break;
     case 0xf14:
         val = s->mhartid;
         break;
